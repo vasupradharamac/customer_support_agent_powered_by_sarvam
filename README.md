@@ -64,7 +64,7 @@ cp .env.example .env      # add your API keys here
 uvicorn main:app --reload
 ```
 
-# Frontend
+### Frontend
 
 ```bash
 cd frontend
