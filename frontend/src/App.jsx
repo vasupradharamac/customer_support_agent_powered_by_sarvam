@@ -1,23 +1,29 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import axios from "axios";
 import { Mic, Volume2, Loader2, Globe } from "lucide-react";
 
-const API_URL = "http://localhost:8000";
-const SESSION_ID = "session_" + Date.now();
+// When served from the backend (production) the API is the same origin.
+// In local dev override with VITE_API_URL.
+const API_URL = (import.meta.env.VITE_API_URL || window.location.origin).replace(/\/$/, "");
+
+// Session ID: prefer one injected by widget.js (via URL param), else generate new.
+const urlParams = new URLSearchParams(window.location.search);
+const SESSION_ID = urlParams.get("session") || "session_" + Date.now();
+const IS_EMBEDDED = urlParams.get("embedded") === "1";
 
 const LANGUAGES = [
-  { code: "en-IN", label: "English", welcome: "Hi! I'm your customer support agent. How can I help you today?" },
-  { code: "ta-IN", label: "தமிழ்", welcome: "வணக்கம்! நான் உங்கள் customer support agent. எப்படி உதவட்டும்?" },
-  { code: "hi-IN", label: "हिंदी", welcome: "नमस्ते! मैं आपका customer support agent हूँ। आज मैं आपकी कैसे मदद कर सकता हूँ?" },
-  { code: "te-IN", label: "తెలుగు", welcome: "నమస్కారం! నేను మీ customer support agent ని. నేను మీకు ఎలా సహాయం చేయగలను?" },
-  { code: "kn-IN", label: "ಕನ್ನಡ", welcome: "ನಮಸ್ಕಾರ! ನಾನು ನಿಮ್ಮ customer support agent. ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?" },
+  { code: "en-IN", label: "English",  welcome: "Hi! I'm your KV Iyengars support agent. How can I help you?" },
+  { code: "ta-IN", label: "தமிழ்",   welcome: "வணக்கம்! நான் KV Iyengars support agent. எப்படி உதவட்டும்?" },
+  { code: "hi-IN", label: "हिंदी",    welcome: "नमस्ते! मैं KV Iyengars का support agent हूँ। आज कैसे मदद करूँ?" },
+  { code: "te-IN", label: "తెలుగు",  welcome: "నమస్కారం! నేను KV Iyengars support agent ని. ఎలా సహాయం చేయగలను?" },
+  { code: "kn-IN", label: "ಕನ್ನಡ",   welcome: "ನಮಸ್ಕಾರ! ನಾನು KV Iyengars support agent. ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?" },
 ];
 
 export default function App() {
   const [selectedLang, setSelectedLang] = useState(LANGUAGES[0]);
   const [showLangDropdown, setShowLangDropdown] = useState(false);
   const [messages, setMessages] = useState([
-    { role: "agent", text: LANGUAGES[0].welcome, lang: "en-IN" }
+    { role: "agent", text: LANGUAGES[0].welcome, lang: "en-IN" },
   ]);
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -26,9 +32,16 @@ export default function App() {
   const audioChunksRef = useRef([]);
   const messagesEndRef = useRef(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+  const scrollToBottom = () => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+
+  // Clean up session when widget/tab is closed
+  useEffect(() => {
+    const cleanup = () => {
+      navigator.sendBeacon(`${API_URL}/session/${SESSION_ID}`, "{}");
+    };
+    window.addEventListener("beforeunload", cleanup);
+    return () => window.removeEventListener("beforeunload", cleanup);
+  }, []);
 
   const handleLanguageChange = (lang) => {
     setSelectedLang(lang);
@@ -42,7 +55,7 @@ export default function App() {
       setIsProcessing(true);
       setProcessingStep("🎙️ Transcribing...");
       mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach(t => t.stop());
+      mediaRecorderRef.current.stream.getTracks().forEach((t) => t.stop());
 
       mediaRecorderRef.current.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: "audio/wav" });
@@ -60,30 +73,28 @@ export default function App() {
 
           const { transcript, agent_response, language, audio_base64 } = res.data;
 
-          setMessages(prev => [
+          setMessages((prev) => [
             ...prev,
             { role: "user", text: transcript, lang: language },
-            { role: "agent", text: agent_response, lang: language }
+            { role: "agent", text: agent_response, lang: language },
           ]);
 
-          const audioBytes = Uint8Array.from(atob(audio_base64), c => c.charCodeAt(0));
+          const audioBytes = Uint8Array.from(atob(audio_base64), (c) => c.charCodeAt(0));
           const audioBuffer = new Blob([audioBytes], { type: "audio/wav" });
           new Audio(URL.createObjectURL(audioBuffer)).play();
 
           setTimeout(scrollToBottom, 100);
         } catch (err) {
           console.error(err);
-          setMessages(prev => [...prev, {
-            role: "agent",
-            text: "Sorry, something went wrong. Please try again.",
-            lang: "en-IN"
-          }]);
+          setMessages((prev) => [
+            ...prev,
+            { role: "agent", text: "Sorry, something went wrong. Please try again.", lang: "en-IN" },
+          ]);
         } finally {
           setIsProcessing(false);
           setProcessingStep("");
         }
       };
-
     } else {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -100,17 +111,25 @@ export default function App() {
     }
   };
 
+  // When embedded in an iframe, strip the outer full-page wrapper so it fills the panel
+  const outerClass = IS_EMBEDDED
+    ? "w-full h-screen bg-gray-900 flex flex-col"
+    : "min-h-screen bg-gray-950 flex items-center justify-center p-4";
+  const innerClass = IS_EMBEDDED
+    ? "w-full h-full flex flex-col"
+    : "w-full max-w-md bg-gray-900 rounded-2xl shadow-2xl flex flex-col h-[600px]";
+
   return (
-    <div className="min-h-screen bg-gray-950 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-gray-900 rounded-2xl shadow-2xl flex flex-col h-[600px]">
+    <div className={outerClass}>
+      <div className={innerClass}>
 
         {/* Header */}
-        <div className="p-4 border-b border-gray-700 flex items-center gap-3">
+        <div className="p-4 border-b border-gray-700 flex items-center gap-3 shrink-0">
           <div className="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center">
             <Volume2 className="text-white w-5 h-5" />
           </div>
           <div>
-            <h1 className="text-white font-semibold">Customer Support Agent</h1>
+            <h1 className="text-white font-semibold text-sm">KV Iyengars Support</h1>
             <p className="text-gray-400 text-xs">Speak in your language</p>
           </div>
 
@@ -170,11 +189,11 @@ export default function App() {
         </div>
 
         {/* Mic Button */}
-        <div className="p-6 border-t border-gray-700 flex flex-col items-center gap-2">
+        <div className="p-5 border-t border-gray-700 flex flex-col items-center gap-2 shrink-0">
           <button
             onClick={toggleRecording}
             disabled={isProcessing}
-            className={`w-16 h-16 rounded-full flex items-center justify-center transition-all duration-200 shadow-lg
+            className={`w-14 h-14 rounded-full flex items-center justify-center transition-all duration-200 shadow-lg
               ${isRecording
                 ? "bg-red-500 scale-110 shadow-red-500/50 animate-pulse"
                 : isProcessing
@@ -182,12 +201,14 @@ export default function App() {
                   : "bg-indigo-600 hover:bg-indigo-500 hover:scale-105"
               }`}
           >
-            <Mic className="text-white w-7 h-7" />
+            <Mic className="text-white w-6 h-6" />
           </button>
           <p className="text-gray-500 text-xs">
-            {isRecording ? "🔴 Recording... click again to send"
-              : isProcessing ? processingStep
-              : "🎙️ Click to speak"}
+            {isRecording
+              ? "🔴 Recording... click again to send"
+              : isProcessing
+                ? processingStep
+                : "🎙️ Click to speak"}
           </p>
         </div>
 

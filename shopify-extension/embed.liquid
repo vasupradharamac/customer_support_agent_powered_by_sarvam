@@ -1,0 +1,32 @@
+{% comment %}
+  KV Iyengars — Sarvam Voice Support Widget
+  ==========================================
+  Installation steps (one-time, takes ~5 minutes):
+
+  1. In Shopify Admin → Online Store → Themes → Edit code
+  2. Open layout/theme.liquid
+  3. Paste this entire snippet just before the closing </body> tag
+  4. Replace YOUR_BACKEND_URL with your deployed backend (e.g. https://kvi-support.railway.app)
+  5. Save — the floating chat button appears on every page
+
+  The widget is hidden on mobile screens narrower than 360px.
+  To show it only on certain pages, wrap in an {% if %} condition.
+{% endcomment %}
+
+<script>
+  window.KVISupport = {
+    apiUrl: "YOUR_BACKEND_URL",
+
+    {%- if customer -%}
+    customerName: {{ customer.name | json }},
+    customerEmail: {{ customer.email | json }},
+    {%- endif -%}
+
+    {%- if cart.item_count > 0 -%}
+    cartItemCount: {{ cart.item_count }},
+    {%- endif -%}
+  };
+</script>
+
+{%- comment -%} Load the widget script from your backend {%- endcomment -%}
+<script src="{{ 'YOUR_BACKEND_URL/widget.js' }}" defer crossorigin="anonymous"></script>
